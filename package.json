@@ -1,0 +1,23 @@
+{
+  "name": "wizard-amigos-website",
+  "version": "0.0.1",
+  "description": "",
+  "main": "src/desktop.js",
+  "scripts": {
+    "start": "budo page/page.js:bundle.js --open --live",
+    "build": "browserify page/page.js > bundle.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wizardamigos/new-webpage.git"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/wizardamigos/new-webpage/issues"
+  },
+  "devDependencies": {
+    "browserify": "^17.0.0",
+    "budo": "^11.8.4"
+  }
+}
