@@ -1092,13 +1092,12 @@ function resources (pool) {
   }
 }
 }).call(this)}).call(this,require('_process'),"/src/desktop.js")
-},{"_process":2,"timeline-page":22}],7:[function(require,module,exports){
+},{"_process":2,"timeline-page":23}],7:[function(require,module,exports){
 (function (process,__filename){(function (){
-const timeline_card = require('timeline-card')
 const timeline_filter = require('timeline-filter')
 const year_filter = require('year-filter')
 const month_filter = require('month-filter')
-const scrollbar = require('scrollbar')
+const timeline_cards = require('timeline-cards/timeline-cards.js')
 /******************************************************************************
   APP TIMELINE COMPONENT
 ******************************************************************************/
@@ -1122,7 +1121,7 @@ function app_timeline (opts = default_opts, protocol) {
   // ----------------------------------------
   const ro = new ResizeObserver(entries => {
     console.log('ResizeObserver:terminal:resize')
-    // !sorting && setScrollTop(timeline_wrapper.scrollHeight)
+    // !sorting && set_scroll_top(timeline_wrapper.scrollHeight)
     const scroll_channel = state.net[state.aka.scrollbar]
     scroll_channel.send({
       head: [id, scroll_channel.send.id, scroll_channel.mid++],
@@ -1137,68 +1136,29 @@ function app_timeline (opts = default_opts, protocol) {
   const status = {}
   const state = STATE.ids[id] = { id, status, wait: {}, net: {}, aka: {} } // all state of component instance
   const cache = resources({})
-  status.YEAR = ''
-  status.MONTH = ''
-  status.DATE = ''
-  status.cards = []
-  status.separators = []
   status.years = []
-  let dates = []
   let sorting = true // latest to oldest
-  let cardfilter
-  let scroll_store = 0
-  let card_index = 0
-  let card_index_rev = 0
-  let scroll_dir = true
-  // ----------------------------------------
-  // Local Storage
-  // ----------------------------------------
-  if (localStorage.getItem('visitedBefore')) {
-    visitor = true // old
-  } else {
-    visitor = false // new
-    localStorage.setItem('visitedBefore', 'true')
-  }
+  let card_filter, prev_year
   // ----------------------------------------
   // OPTS
   // ----------------------------------------
   const { data } = opts
-  // Assigning all the icons
-  const { img_src: {
-      icon_folder_solid= `${prefix}/icon_folder_solid.svg`,
-      sort_down,
-      sort_up
-  } } = data
-
+  // Data preprocessing
   let cards_data = require(`../data/data.json`)['timeline']
   cards_data = cards_data.map(card => {
-      const date = new Date(card.date + ' ' + convert_time_format(card.time))
+      const date = new Date(card.date)
       if(!status.years.includes(date.getFullYear()))
         status.years.push(date.getFullYear())
       card.date_raw = date.getTime()
       card.data = data
-      dates.push(card.date_raw)
       return card
     }).reverse()
-    // .sort(function (a, b) {
-    //   const dateA = new Date(a.date_raw)
-    //   const dateB = new Date(b.date_raw)
-    //   // // Compare years in ascending/descending order
-    //   // if (dateA.getFullYear() !== dateB.getFullYear()) {
-    //   //   return visitor ? dateB.getFullYear() - dateA.getFullYear() : dateA.getFullYear() - dateB.getFullYear()
-    //   // }
-    //   // If years are the same, compare dates in ascending/descending order
-    //   return dateB.getTime() - dateA.getTime()
-    // })
   status.years = status.years.filter((value) => {
     return !isNaN(value)
   })
   status.years_max = [...status.years]
-  cardfilter = [...cards_data]
-  const tags = new Set(cards_data.flatMap(card => card.tags))
-  // const card_groups = []
-  let year_cache, card_group, card_group_rev, prev_year
-  status.YEAR = new Date(cards_data[0].date_raw).getFullYear()
+  card_filter = [...cards_data]
+  prev_year = new Date(cards_data[0].date_raw).getFullYear()
   // ----------------------------------------
   // PROTOCOL
   // ----------------------------------------
@@ -1212,41 +1172,30 @@ function app_timeline (opts = default_opts, protocol) {
   const shadow = el.attachShadow(shopts)
   shadow.adoptedStyleSheets = [sheet]
   shadow.innerHTML = `
-  <div class="timeline_section">
+  <div class="main_wrapper">
     <div class="windowbar"></div>
-    <div class="main_wrapper">
-      <div class="filter_wrapper">
-          <div class="month_wrapper">
-            <div class="current_separator">
-            </div>
-            <div class="timeline_wrapper">
-            </div>
-            <div class="empty_wrapper">
-              <div>
-                Loading
-              <div>
-            </div>
-          </div>
+    <div class="filter_wrapper">
+      <div class="month_wrapper">
       </div>
     </div>
   </div>`
   const main_wrapper = shadow.querySelector('.main_wrapper')
-  const timeline_wrapper = shadow.querySelector('.timeline_wrapper')
   const filter_wrapper = shadow.querySelector('.filter_wrapper')
   const month_wrapper = shadow.querySelector('.month_wrapper')
-  const empty_wrapper = shadow.querySelector('.empty_wrapper')
-  const current_separator = shadow.querySelector('.current_separator')
   // ----------------------------------------
-  const windowbar_shadow = shadow.querySelector('.windowbar').attachShadow(shopts)
-  let fragment
   // ----------------------------------------
   // ELEMENTS
   // ----------------------------------------
-  let timeline_cards = []
   { // timeline cards
-    const on = {}
-    append_cards(0, 10)
-    timeline_wrapper.onscroll = onscroll
+    const on = {
+      'update_calendar': update_calendar,
+      'update_timeline_filter': update_timeline_filter
+    }
+    const protocol = use_protocol('timeline_cards')({ state, on })
+    const opts = { data, cards_data, years: status.years }
+    const element = shadowfy()(timeline_cards(opts, protocol))
+    month_wrapper.append(element)
+
   }
   { // timeline filter
     const on = {
@@ -1257,7 +1206,7 @@ function app_timeline (opts = default_opts, protocol) {
     }
     const protocol = use_protocol('timeline_filter')({ state, on })
     const opts = {
-      data, tags: Array.from(tags),
+      data, tags: [],
       latest_date: cards_data[0].date_raw
     }
     const element = shadowfy()(timeline_filter(opts, protocol))
@@ -1284,8 +1233,13 @@ function app_timeline (opts = default_opts, protocol) {
     }
 
     async function on_set_scroll ({ data }) {
-      set_scroll(data)
-      updateCalendar()
+      const channel = state.net[state.aka.timeline_cards]
+      channel.send({
+        head: [id, channel.send.id, channel.mid++],
+        type: 'set_scroll',
+        data
+      })
+      update_calendar({ data: { check: false, year: data.value }})
     }
   }
   year_filter_wrapper.classList.add('year_filter_wrapper')
@@ -1298,325 +1252,57 @@ function app_timeline (opts = default_opts, protocol) {
     month_filter_wrapper.classList.add('month_filter_wrapper')
     month_wrapper.append(month_filter_wrapper)
     async function on_set_scroll ({ data }) {
-      set_scroll(data)
-      updateCalendar()
-    }
-  }
-  { // scrollbar
-    const on = { 'set_scroll': on_set_scroll, status: onstatus }
-    const protocol = use_protocol('scrollbar')({ state, on })
-    opts.data.img_src.icon_arrow_start = opts.data.img_src.icon_arrow_up
-    opts.data.img_src.icon_arrow_end = opts.data.img_src.icon_arrow_down
-    const scroll_opts = { data }
-    const element = shadowfy()(scrollbar(scroll_opts, protocol))
-    filter_wrapper.append(element)
-
-    const channel = state.net[state.aka.scrollbar]
-    ro.observe(timeline_wrapper)
-    async function on_set_scroll (message) { setScrollTop(message.data) }
-    async function onstatus (message) {
+      const channel = state.net[state.aka.timeline_cards]
       channel.send({
         head: [id, channel.send.id, channel.mid++],
-        refs: { cause: message.head },
-        type: 'update_size',
-        data: {
-          sh: timeline_wrapper.scrollHeight,
-          ch: timeline_wrapper.clientHeight,
-          st: timeline_wrapper.scrollTop
-        }
+        type: 'set_scroll',
+        data
       })
+      update_calendar({ data: { check: false, year: prev_year }})
     }
   }
   // ----------------------------------------
   // INIT
   // ----------------------------------------
-  updateCalendar()
-  current_separator.innerHTML = sorting ? Math.max(...status.years) : Math.min(...status.years)
+  update_calendar({ data: { check: false, year: prev_year }})
   return el
 
-  function make_card (card_data) {
-    const index = scroll_dir ? card_index : card_index_rev
-    const protocol = use_protocol(`card_${index}`)({ state, on })
-    const opts = card_data
-    const element = shadowfy()(timeline_card(opts, protocol))          
-    const slice = card_data.date.slice(-4)
-    // if(i === Object.keys(cards_data).length - 1){
-    //   const latest = visitor ? Math.min(...status.years) : Math.max(...status.years)
-    //   let oldest = Number(year_cache) - 1
-      
-    //   while(visitor ? latest <= oldest : latest >= oldest){
-    //     const separator = document.createElement('div')
-    //     separator.innerHTML = oldest
-    //     separator.classList.add('separator')
-    //     card_groups.push(separator)
-    //     visitor ? oldest-- : oldest++
-    //   }
-    // }
-    let scroll_index
-    if(scroll_dir)
-      scroll_index = index == 0 ? undefined : cardfilter[index - 1].date.slice(-4)
-    else
-      scroll_index = cardfilter.length == index ? undefined : cardfilter[index].date.slice(-4)
-
-    if (scroll_index !== slice) {
-      // console.error(slice, scroll_index, card_data.date, cardfilter[index].date)
-      const separator = document.createElement('div')
-      separator.innerHTML = slice
-      separator.classList.add('separator')
-      status.separators.push(separator)
-      // card_groups.push(separator)
-      fragment.appendChild(separator)
-    
-      if(scroll_dir){
-        card_group = document.createElement('div')
-        card_group.classList.add('card_group')
-        fragment.appendChild(card_group)
-      }
-      else{
-        card_group_rev = document.createElement('div')
-        card_group_rev.classList.add('card_group')
-        fragment.appendChild(card_group_rev)
-      }  
-      // card_groups.push(card_group)
-      year_cache = slice
-    }
-    element.idx = index
-    if(scroll_dir){
-      card_group.append(element)
-      card_index++
-    }
-    else{
-      card_group_rev.prepend(element)
-      card_index_rev--
-    }
-    return element
-  }
-
-  async function append_cards(start, end){
-    scroll_dir = true
-    fragment = document.createDocumentFragment()
-    timeline_cards.push(...cardfilter.slice(start, end).map(make_card))
-    timeline_wrapper.appendChild(fragment)
-  }
-  async function onscroll () {
-    const timeline_top = timeline_wrapper.getBoundingClientRect().top
-    const timeline_height = timeline_wrapper.scrollHeight
-    const timeline_scrollTop = timeline_wrapper.scrollTop
-    //Bottom is reach load more cards
-    if(0 < card_index_rev && timeline_scrollTop < timeline_height/10){
-      // setScrollTop(timeline_height/10)
-      scroll_dir = false
-      fragment = document.createDocumentFragment()
-      timeline_cards.push(...cardfilter.slice(card_index_rev < 10 ? 0 : card_index_rev - 10, card_index_rev).reverse().map(make_card))
-      timeline_wrapper.prepend(fragment)
-    }
-    else if(cardfilter.length > card_index && timeline_height < timeline_scrollTop + 1000){
-      append_cards(card_index, card_index+10)
-    }
-  
-    scroll_store = timeline_scrollTop
-    const scroll_channel = state.net[state.aka.scrollbar]
-    scroll_channel.send({
-      head: [id, scroll_channel.send.id, scroll_channel.mid++],
-      type: 'handle_scroll'
-    })
-
-    let check = true //to check if scrolling was successful using separators
-    //scroll using separators as ref
-    status.separators.some(separator => {
-      const child_top = separator.getBoundingClientRect().top
-      if (child_top && child_top >= timeline_top && child_top < timeline_top + 10) {
-        const year = separator.innerHTML
-        status.YEAR = year
-        updateCalendar()
-        const channel = state.net[state.aka.year_filter]
-        channel.send({
-          head: [id, channel.send.id, channel.mid++],
-          type: 'update_year_filter',
-          data: year
-        })
-        check = false
-        return true
-      }
-    })
-    //else scroll using cards as ref
-    if (check)
-      timeline_cards.some(card => {
-        const { idx } = card
-        const child_top = card.getBoundingClientRect().top
-        if (child_top && child_top >= timeline_top - 180 && child_top < timeline_top + 40) {
-          const year = cards_data[idx].date.slice(-4)
-          status.YEAR = year
-          updateCalendar()
-          const channel = state.net[state.aka.year_filter]
-          channel.send({
-            head: [id, channel.send.id, channel.mid++],
-            type: 'update_year_filter',
-            data: year
-          })
-          return true
-        }
-      })
-    const channel = state.net[state.aka.timeline_filter]
+  async function update_timeline_filter ({ data }) {
+    let channel = state.net[state.aka.timeline_filter]
     channel.send({
       head: [id, channel.send.id, channel.mid++],
       type: 'update_timeline_filter',
-      data: { month: status.MONTH , year: status.YEAR }
+      data
     })
-    current_separator.innerHTML = status.YEAR
-  }
-  function convert_time_format (time) {
-    let temp = time.slice(0, 2)
-    if (time.includes('PM')) { temp = parseInt(temp) + 12 }
-    return temp + time.slice(2, -2)
-  }
-  async function set_scroll (data) {
-    scroll_dir = true
-    //for scroll by year separators are enough
-    if (data.filter === 'YEAR'){
-      //loading the cards
-      let scroll_index = 10
-      fragment = document.createDocumentFragment()
-      timeline_wrapper.innerHTML = ''
-      timeline_cards = []
-      status.separators = []
-      card_index = Number(cardfilter[card_index].date.slice(-5)) > data.value ? card_index : 0
-      for (const card_data of cardfilter.slice(card_index)){
-        const temp = Number(card_data.date.slice(-5))
-        if(temp <= data.value){
-          scroll_dir = false
-          card_index_rev = card_index
-          if(card_index < 10){
-            scroll_index = card_index
-          }
-          year_cache = cardfilter[card_index - scroll_index].date.slice(-5)
-          timeline_cards.push(...cardfilter.slice(card_index - scroll_index, card_index).reverse().map(make_card))
-          break
-        }
-        card_index++
-      }
-      timeline_wrapper.prepend(fragment)
-      append_cards(card_index, card_index + 10)
-      //scroll to the cards
-      status[data.filter] = data.value
-      setScrollTop(timeline_cards[scroll_index].getBoundingClientRect().top - timeline_wrapper.getBoundingClientRect().top + timeline_wrapper.scrollTop)
-      current_separator.innerHTML = data.value
-    }//otherwise cards are needed
-    else if (data.value){
-      const filter_date = new Date(data.value + ' ' + status.YEAR)
-      fragment = document.createDocumentFragment()
-      for (const card_data of cardfilter.slice(card_index)){
-        if(new Date(card_data.date).getTime() < filter_date.getTime())
-          break
-        timeline_cards.push(make_card(card_data))
-      }
-      timeline_wrapper.appendChild(fragment)
-      status[data.filter] = data.value
-      let check = true
-      timeline_cards.some(card => {
-        const { idx } = card
-        const card_data = cards_data[idx]
-        if(cardfilter.includes(card_data)){
-          const card_date = card_data.date
-
-          if (card_date.includes(data.value) && card_date.includes(status.YEAR)) {
-            if(check && status.cards){
-              setScrollTop(card.getBoundingClientRect().top - timeline_wrapper.getBoundingClientRect().top + timeline_wrapper.scrollTop)
-
-              check = false
-              status.cards.forEach(status_card => {
-                status_card.classList.remove('active')
-              })
-              if(status.cards[0] === card){
-                status.cards = []
-                return true
-              }
-              status.cards = []
-            }
-            if(data.filter === 'DATE'){
-              card.classList.add('active')
-              status.cards.push(card)
-            }
-          }
-          else if(!check){
-            return true
-          }
-        }
-      })
-      const timeline_channel = state.net[state.aka.timeline_filter]
-      timeline_channel.send({
-        head: [id, timeline_channel.send.id, timeline_channel.mid++],
-        type: 'update_timeline_filter',
-        data: { month: status.MONTH , year: status.YEAR }
-      })
-    }//otherwise it means we need to remove highlight
-    else if(status.cards){
-      status.cards.forEach(status_card => {
-        status_card.classList.remove('active')
-      })
-      status.cards = []
-      return
-    }
-    //update year_filter
-    const year_channel = state.net[state.aka.year_filter]
-    year_channel.send({
-      head: [id, year_channel.send.id, year_channel.mid++],
-      type: 'update_year_filter',
-      data: status.YEAR
-    })
-
-  }
-  async function setScrollTop (value) {
-    timeline_wrapper.scrollTop = value
-  }
-  async function set_filter (data) {
-    //Store filter value
-    status[data.filter] = data.value
-    timeline_wrapper.innerHTML = ''
-    cardfilter = [...cards_data]
-    //filter the json data
-    if (status.SEARCH) cardfilter = cardfilter.filter((card_data) => {
-      return card_data.title.toLowerCase().match(status.SEARCH.toLowerCase())
-    })
-    if (status.STATUS && status.STATUS !== 'ALL') cardfilter = cardfilter.filter((card_data) => {
-      return card_data.active_state === status.STATUS && card_data
-    })
-    if (status.TAGS && status.TAGS !== 'ALL') {
-      cardfilter = cardfilter.filter((card_data) => {
-        return card_data.tags.includes(status.TAGS) && card_data
-      })
-    }
-    //update timeline_cards
-    card_index = 0
-    year_cache = undefined
-    append_cards(0, cardfilter.length < 10 ? cardfilter.length : 10)
-    //Update scrollbar and calendar
-    const channel = state.net[state.aka.scrollbar]
+    channel = state.net[state.aka.year_filter]
     channel.send({
       head: [id, channel.send.id, channel.mid++],
-      type: 'handle_scroll'
+      type: 'update_year_filter',
+      data: data.year
     })
-    if (!cardfilter[0]) return
-
-    set_scroll({
-      filter: 'YEAR',
-      value: sorting ? Math.max(...status.years_max) : Math.min(...status.years_max)
-    })
-    updateCalendar(true)//boolean argument indicates that this request is coming from set_filter
   }
-  async function updateCalendar (check = false) {
+  async function set_filter (data) {
+    const channel = state.net[state.aka.timeline_cards]
+    channel.send({
+      head: [id, channel.send.id, channel.mid++],
+      type: 'set_filter',
+      data
+    })
+  }
+  async function update_calendar ({ data, head }) {
+    const { check, year } = data
     let dates = []
-    if (status.YEAR) cardfilter.forEach(card_data => {
-      if (card_data.date.includes(status.YEAR)) dates.push(card_data.date)
+    if (year) card_filter.forEach(card_data => {
+      if (card_data.date.includes(year)) dates.push(card_data.date)
     })
     const channel = state.net[state.aka.month_filter]
-    if(prev_year !== String(status.YEAR) || check){
+    if(prev_year !== String(year) || check){
       channel.send({
         head: [id, channel.send.id, channel.mid++],
         type: 'update_calendar',
-        data: {dates, year: Number(status.YEAR)}
+        data: {dates, year: Number(year)}
       })
-      prev_year = String(status.YEAR).slice(0)
+      prev_year = String(year).slice(0)
       if(status.cards){
         status.cards.forEach(status_card => {
           status_card.classList.remove('active')
@@ -1629,10 +1315,6 @@ function app_timeline (opts = default_opts, protocol) {
 }
 function get_theme () {
   return`
-    .timeline_section {
-      display: flex;
-      flex-direction: column;
-    }
     .main_wrapper {
       box-sizing: border-box;
       display: flex;
@@ -1657,70 +1339,9 @@ function get_theme () {
       min-height: 500px;
       overflow: hidden;
       position: relative;
-      margin: 0 20px;
-    }
-    .main_wrapper .filter_wrapper .timeline_wrapper {
-      display: flex;
-      flex-direction: column;
-      width: 100%;
-      height: 500px;
-      overflow: scroll;
-      gap: 20px;
-      scrollbar-width: none; /* For Firefox */
-    }
-    .main_wrapper .filter_wrapper .timeline_wrapper.hide {
-      display: none;
-    }
-    .main_wrapper .filter_wrapper .empty_wrapper {
-      display: none;
-      position: absolute;
-      width: 100%;
-      height: 100%;
-      justify-content: center;
-      align-items: center;
-      top: 0;
-    }
-    .main_wrapper .filter_wrapper .empty_wrapper.show {
-      display: flex;
-    }
-    .main_wrapper .filter_wrapper .timeline_wrapper .card_group {
-      width: 100%;
-      padding: 0px;
-      display: grid;
-      gap: 20px;
-      grid-template-columns: 12fr;
-      border: 4px solid transparent;
-    }
-    .main_wrapper .filter_wrapper .timeline_wrapper .card_group > .active{
-      outline: 4px solid var(--ac-1);
-    }
-    .main_wrapper .filter_wrapper .timeline_wrapper .card_group > .hide{
-      display: none;
-    }
-    .main_wrapper .filter_wrapper .timeline_wrapper::-webkit-scrollbar {
-      display: none;
-    }
-    .main_wrapper .filter_wrapper .timeline_wrapper .separator{
-      background-color: var(--ac-1);
-      text-align: center;
-      margin: 0 4px;
-      border: 1px solid var(--ac-3);
-      position: relative;
-      z-index: 2;
     }
     .main_wrapper .filter_wrapper > div:last-child{
       border-left: 1px solid var(--ac-3);
-    }
-    .main_wrapper .filter_wrapper .month_wrapper .current_separator{
-      position: absolute;
-      display: block;
-      top: 0;
-      width: calc(100% - 9px);
-      background-color: var(--ac-1);
-      text-align: center;
-      margin: 0 4px;
-      border: 1px solid var(--ac-3);
-      z-index: 1;
     }
     .main_wrapper .filter_wrapper .year_filter_wrapper{
       border-left:1px solid var(--ac-3);
@@ -1740,23 +1361,6 @@ function get_theme () {
     .month_filter_wrapper.show{
       display: block;
     }
-    @container(min-width: 400px) {
-      .main_wrapper .filter_wrapper .timeline_wrapper .card_group:last-child,
-      .main_wrapper .filter_wrapper .timeline_wrapper .separator:last-child{
-        margin-bottom: 300px;
-      }
-    }
-    @container(min-width: 768px) {
-      .main_wrapper .filter_wrapper .timeline_wrapper .card_group {
-        grid-template-columns: repeat(2, 6fr);
-      }
-    }
-    @container(min-width: 1200px) {
-      .main_wrapper .filter_wrapper .timeline_wrapper .card_group {
-        grid-template-columns: repeat(3, 4fr);
-      }
-    }
-
   `
 }
 // ----------------------------------------------------------------------------
@@ -1810,7 +1414,7 @@ function resources (pool) {
   }
 }
 }).call(this)}).call(this,require('_process'),"/src/node_modules/app-timeline/app-timeline.js")
-},{"../data/data.json":12,"_process":2,"month-filter":14,"scrollbar":15,"timeline-card":20,"timeline-filter":21,"year-filter":23}],8:[function(require,module,exports){
+},{"../data/data.json":12,"_process":2,"month-filter":14,"timeline-cards/timeline-cards.js":21,"timeline-filter":22,"year-filter":24}],8:[function(require,module,exports){
 (function (process,__filename){(function (){
 /******************************************************************************
   DAY BUTTON COMPONENT
@@ -22398,6 +22002,492 @@ function resources (pool) {
 }).call(this)}).call(this,require('_process'),"/src/node_modules/timeline-card/timeline-card.js")
 },{"_process":2}],21:[function(require,module,exports){
 (function (process,__filename){(function (){
+const timeline_card = require('timeline-card')
+const scrollbar = require('scrollbar')
+/******************************************************************************
+  APP TIMELINE COMPONENT
+******************************************************************************/
+// ----------------------------------------
+// MODULE STATE & ID
+var count = 0
+const [cwd, dir] = [process.cwd(), __filename].map(x => new URL(x, 'file://').href)
+const ID = dir.slice(cwd.length)
+const STATE = { ids: {}, net: {} } // all state of component module
+// ----------------------------------------
+const sheet = new CSSStyleSheet
+sheet.replaceSync(get_theme())
+const default_opts = { }
+const shopts = { mode: 'closed' }
+// ----------------------------------------
+module.exports = timeline_cards
+// ----------------------------------------
+function timeline_cards (opts = default_opts, protocol) {
+  // ----------------------------------------
+  // RESOURCE POOL (can't be serialized)
+  // ----------------------------------------
+  const ro = new ResizeObserver(entries => {
+    console.log('ResizeObserver:terminal:resize')
+    // !sorting && set_scroll_top(timeline_wrapper.scrollHeight)
+    const scroll_channel = state.net[state.aka.scrollbar]
+    scroll_channel.send({
+      head: [id, scroll_channel.send.id, scroll_channel.mid++],
+      refs: { },
+      type: 'handle_scroll',
+    })
+  })
+  // ----------------------------------------
+  // ID + JSON STATE
+  // ----------------------------------------
+  const id = `${ID}:${count++}` // assigns their own name
+  const status = {}
+  const state = STATE.ids[id] = { id, status, wait: {}, net: {}, aka: {} } // all state of component instance
+  const cache = resources({})
+  status.separators = []
+  status.years = []
+  status.cards = []
+  let sorting = true // latest to oldest
+  let card_group, card_group_rev, card_filter, fragment
+  let card_index = 0
+  let card_index_rev = 0
+  let scroll_dir = true
+  let timeline_container = []
+  // ----------------------------------------
+  // OPTS
+  // ----------------------------------------
+  const { data, cards_data, years } = opts
+  // Data preprocessing
+  status.years = years
+  status.years_max = [...years]
+  card_filter = [...cards_data]
+  const tags = new Set(cards_data.flatMap(card => card.tags))
+  status.YEAR = new Date(cards_data[0].date_raw).getFullYear()
+  // ----------------------------------------
+  // PROTOCOL
+  // ----------------------------------------
+  const PROTOCOL = {}
+  const on = {
+    'set_scroll': set_scroll,
+    'set_filter': set_filter
+  }
+  const up_channel = use_protocol('up')({ protocol, state, on })
+  // ----------------------------------------
+  // TEMPLATE
+  // ----------------------------------------
+  const el = document.createElement('div')
+  const shadow = el.attachShadow(shopts)
+  shadow.adoptedStyleSheets = [sheet]
+  shadow.innerHTML = `
+    <div class="scrollbar_wrapper">
+      <div class="current_separator">
+      </div>
+      <div class="timeline_wrapper">
+      </div>
+    </div>
+  `
+  const scrollbar_wrapper = shadow.querySelector('.scrollbar_wrapper')
+  const timeline_wrapper = shadow.querySelector('.timeline_wrapper')
+  const current_separator = shadow.querySelector('.current_separator')
+  // ----------------------------------------
+  // ----------------------------------------
+  // ELEMENTS
+  // ----------------------------------------
+  { // timeline cards
+    const on = {}
+    append_cards(0, 10)
+    timeline_wrapper.onscroll = onscroll
+  }
+  { // scrollbar
+    const on = { 'set_scroll': on_set_scroll, status: onstatus }
+    const protocol = use_protocol('scrollbar')({ state, on })
+    opts.data.img_src.icon_arrow_start = opts.data.img_src.icon_arrow_up
+    opts.data.img_src.icon_arrow_end = opts.data.img_src.icon_arrow_down
+    const scroll_opts = { data }
+    const element = shadowfy()(scrollbar(scroll_opts, protocol))
+    scrollbar_wrapper.append(element)
+
+    const channel = state.net[state.aka.scrollbar]
+    ro.observe(timeline_wrapper)
+    async function on_set_scroll (message) { set_scroll_top(message.data) }
+    async function onstatus (message) {
+      channel.send({
+        head: [id, channel.send.id, channel.mid++],
+        refs: { cause: message.head },
+        type: 'update_size',
+        data: {
+          sh: timeline_wrapper.scrollHeight,
+          ch: timeline_wrapper.clientHeight,
+          st: timeline_wrapper.scrollTop
+        }
+      })
+    }
+  }
+  // ----------------------------------------
+  // INIT
+  // ----------------------------------------
+  current_separator.innerHTML = sorting ? Math.max(...status.years) : Math.min(...status.years)
+  return el
+
+  async function make_card (card_data) {
+    const index = scroll_dir ? card_index : card_index_rev
+    const protocol = use_protocol(`card_${index}`)({ state, on })
+    const opts = card_data
+    const element = shadowfy()(timeline_card(opts, protocol))          
+    const year = card_data.date.slice(-4)
+    let last_year
+    if(scroll_dir)
+      last_year = index == 0 ? undefined : card_filter[index - 1].date.slice(-4)
+    else
+      last_year = card_filter.length == index ? undefined : card_filter[index].date.slice(-4)
+
+    if (last_year !== year) {
+      const separator = document.createElement('div')
+      separator.innerHTML = year
+      separator.classList.add('separator')
+      status.separators.push(separator)
+      fragment.appendChild(separator)
+    
+      if(scroll_dir){
+        card_group = document.createElement('div')
+        card_group.classList.add('card_group')
+        fragment.appendChild(card_group)
+      }
+      else{
+        card_group_rev = document.createElement('div')
+        card_group_rev.classList.add('card_group')
+        fragment.appendChild(card_group_rev)
+      }  
+    }
+    element.idx = index
+    if(scroll_dir){
+      card_group.append(element)
+      card_index++
+    }
+    else{
+      card_group_rev.prepend(element)
+      card_index_rev--
+    }
+    timeline_container.push(element)
+  }
+  async function clear_timeline(){
+    timeline_wrapper.innerHTML = ''
+    timeline_container = []
+    status.separators = []
+  }
+  async function append_cards(start, end){
+    scroll_dir = true
+    fragment = document.createDocumentFragment()
+    card_filter.slice(start, end).map(make_card)
+    timeline_wrapper.appendChild(fragment)
+  }
+  async function prepend_cards(start, end){
+    scroll_dir = false
+    fragment = document.createDocumentFragment()
+    card_filter.slice(start, end).reverse().map(make_card)
+    timeline_wrapper.prepend(fragment)
+  }
+  async function onscroll () {
+    const timeline_top = timeline_wrapper.getBoundingClientRect().top
+    const timeline_height = timeline_wrapper.scrollHeight
+    const timeline_scrollTop = timeline_wrapper.scrollTop
+    //Bottom or top has reached load more cards
+    if(0 < card_index_rev && timeline_scrollTop < timeline_height/10){
+      set_scroll_top(timeline_height/10)
+      prepend_cards(card_index_rev < 10 ? 0 : card_index_rev - 10, card_index_rev)
+    }
+    else if(card_filter.length > card_index && timeline_height < timeline_scrollTop + 1000){
+      append_cards(card_index, card_index+10)
+    }
+  
+    const scroll_channel = state.net[state.aka.scrollbar]
+    scroll_channel.send({
+      head: [id, scroll_channel.send.id, scroll_channel.mid++],
+      type: 'handle_scroll'
+    })
+
+    let check = true //to check if scrolling was successful using separators
+    //scroll using separators as ref
+    status.separators.some(separator => {
+      const child_top = separator.getBoundingClientRect().top
+      if (child_top && child_top >= timeline_top && child_top < timeline_top + 10) {
+        const year = separator.innerHTML
+        status.YEAR = year
+        check = false
+        return true
+      }
+    })
+    //else scroll using cards as ref
+    if (check)
+      timeline_container.some(card => {
+        const { idx } = card
+        const child_top = card.getBoundingClientRect().top
+        if (child_top && child_top >= timeline_top - 180 && child_top < timeline_top + 40) {
+          const year = cards_data[idx].date.slice(-4)
+          status.YEAR = year
+          return true
+        }
+      })
+    // Update the year_button
+    up_channel.send({
+      head: [id, up_channel.send.id, up_channel.mid++],
+      type: 'update_timeline_filter',
+      data: { month: status.MONTH , year: status.YEAR }
+    })
+    up_channel.send({
+      head: [id, up_channel.send.id, up_channel.mid++],
+      type: 'update_calendar',
+      data: { check: false, year: status.YEAR}
+    })
+    current_separator.innerHTML = status.YEAR
+  }
+  async function set_scroll ({ data }) {
+    scroll_dir = true
+    //for scroll by year
+    if (data.filter === 'YEAR'){
+      //Remove all cards
+      clear_timeline()
+      //Find the first card of the year
+      card_index = card_index < card_filter.length && Number(card_filter[card_index].date.slice(-5)) > data.value ? card_index : 0
+      for (const card_data of card_filter.slice(card_index)){
+        const temp = Number(card_data.date.slice(-5))
+        if(temp <= data.value){
+          card_index_rev = card_index
+          break
+        }
+        card_index++
+      }
+      //Populate somecards cards around the first card
+      const scroll_index = card_index < 10 ? card_index : 10
+      append_cards(card_index, card_index + 10)
+      //scroll to the first card
+      status[data.filter] = data.value
+      set_scroll_top(1)
+      current_separator.innerHTML = data.value
+      prepend_cards(card_index_rev - scroll_index, card_index_rev)
+    }//otherwise cards are needed
+    else if (data.value){
+      //load the cards
+      const filter_date = new Date(data.value + ' ' + status.YEAR).getTime()
+      fragment = document.createDocumentFragment()
+      scroll_dir = false
+      for(i=card_index_rev;  i >= 0 && card_filter[i].date_raw <= filter_date; i--){
+        make_card(card_filter[i])
+      }
+      scroll_dir = true
+      for(i=card_index; i < card_filter.length && card_filter[i].date_raw >= filter_date; i++){
+        make_card(card_filter[i])
+      }
+      timeline_wrapper.appendChild(fragment)
+
+      //scroll to the cards
+      status[data.filter] = data.value
+      let check = true
+      timeline_container.some(card => {
+        const { idx } = card
+        const card_data = cards_data[idx]
+        const card_date = card_data.date_raw
+        if (card_date === filter_date) {
+          //remove highlight on previous cards
+          if(check && status.cards){
+            set_scroll_top(card.getBoundingClientRect().top - timeline_wrapper.getBoundingClientRect().top + timeline_wrapper.scrollTop)
+
+            check = false
+            status.cards.forEach(status_card => {
+              status_card.classList.remove('active')
+            })
+            if(status.cards[0] === card){
+              status.cards = []
+              return true
+            }
+            status.cards = []
+          }
+          //add highlight
+          if(data.filter === 'DATE'){
+            card.classList.add('active')
+            status.cards.push(card)
+          }
+        }
+        else if(!check){
+          return true
+        }
+      })
+    }//otherwise it means we need to remove highlight
+    else if(status.cards){
+      status.cards.forEach(status_card => {
+        status_card.classList.remove('active')
+      })
+      status.cards = []
+      return
+    }
+
+  }
+  async function set_scroll_top (value) {
+    timeline_wrapper.scrollTop = value
+  }
+  async function set_filter ({ data }) {
+    //Store filter value
+    status[data.filter] = data.value
+    card_filter = [...cards_data]
+    //filter the json data
+    if (status.SEARCH) card_filter = card_filter.filter((card_data) => {
+      return card_data.title.toLowerCase().match(status.SEARCH.toLowerCase())
+    })
+    if (status.STATUS && status.STATUS !== 'ALL') card_filter = card_filter.filter((card_data) => {
+      return card_data.active_state === status.STATUS && card_data
+    })
+    if (status.TAGS && status.TAGS !== 'ALL') {
+      card_filter = card_filter.filter((card_data) => {
+        return card_data.tags.includes(status.TAGS) && card_data
+      })
+    }
+    //update timeline_cards
+    card_index = 0
+    clear_timeline()
+    append_cards(0, card_filter.length < 10 ? card_filter.length : 10)
+    //Update scrollbar and calendar
+    const channel = state.net[state.aka.scrollbar]
+    channel.send({
+      head: [id, channel.send.id, channel.mid++],
+      type: 'handle_scroll'
+    })
+    if (!card_filter[0]) return
+
+    set_scroll_top(0)
+    up_channel.send({
+      head: [id, up_channel.send.id, up_channel.mid++],
+      type: 'update_calendar',
+      data: { check: true, year: status.YEAR}
+    })//boolean argument indicates that this request is coming from set_filter
+  }
+}
+function get_theme () {
+  return`
+  *{
+    box-sizing: border-box;
+  }
+  .timeline_wrapper {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 500px;
+    overflow: scroll;
+    gap: 20px;
+    scrollbar-width: none; /* For Firefox */
+  }
+  .timeline_wrapper.hide {
+    display: none;
+  }
+  .timeline_wrapper .card_group {
+    width: 100%;
+    display: grid;
+    gap: 20px;
+    grid-template-columns: 12fr;
+    padding: 0 2px;
+  }
+  .timeline_wrapper .card_group > .active{
+    outline: 4px solid var(--ac-1);
+  }
+  .timeline_wrapper .card_group > .hide{
+    display: none;
+  }
+  .timeline_wrapper::-webkit-scrollbar {
+    display: none;
+  }
+  .timeline_wrapper .separator{
+    background-color: var(--ac-1);
+    text-align: center;
+    margin: 0 4px;
+    border: 1px solid var(--ac-3);
+    position: relative;
+    z-index: 2;
+  }
+  > div:last-child{
+    border-left: 1px solid var(--ac-3);
+  }
+  .current_separator{
+    position: absolute;
+    display: block;
+    top: 0;
+    width: calc(100% - 39px);
+    background-color: var(--ac-1);
+    text-align: center;
+    margin: 0 4px;
+    border: 1px solid var(--ac-3);
+    z-index: 1;
+  }
+  .scrollbar_wrapper{
+    display: flex;
+  }
+  @container(min-width: 400px) {
+    .timeline_wrapper .card_group:last-child,
+    .timeline_wrapper .separator:last-child{
+      margin-bottom: 300px;
+    }
+  }
+  @container(min-width: 768px) {
+    .timeline_wrapper .card_group {
+      grid-template-columns: repeat(2, 6fr);
+    }
+  }
+  @container(min-width: 1200px) {
+    .timeline_wrapper .card_group {
+      grid-template-columns: repeat(3, 4fr);
+    }
+  }
+  `
+}
+// ----------------------------------------------------------------------------
+function shadowfy (props = {}, sheets = []) {
+  return element => {
+    const el = Object.assign(document.createElement('div'), { ...props })
+    const sh = el.attachShadow(shopts)
+    sh.adoptedStyleSheets = sheets
+    sh.append(element)
+    return el
+  }
+}
+function use_protocol (petname) {
+  return ({ protocol, state, on = { } }) => {
+    if (petname in state.aka) throw new Error('petname already initialized')
+    const { id } = state
+    const invalid = on[''] || (message => console.error('invalid type', message))
+    if (protocol) return handshake(protocol(Object.assign(listen, { id })))
+    else return handshake
+    // ----------------------------------------
+    // @TODO: how to disconnect channel
+    // ----------------------------------------
+    function handshake (send) {
+      state.aka[petname] = send.id
+      const channel = state.net[send.id] = { petname, mid: 0, send, on }
+      return protocol ? channel : Object.assign(listen, { id })
+    }
+    function listen (message) {
+      const [from] = message.head
+      const by = state.aka[petname]
+      if (from !== by) return invalid(message) // @TODO: maybe forward
+      console.log(`[${id}]:${petname}>`, message)
+      const { on } = state.net[by]
+      const action = on[message.type] || invalid
+      action(message)
+    }
+  }
+}
+// ----------------------------------------------------------------------------
+function resources (pool) {
+  var num = 0
+  return factory => {
+    const prefix = num++
+    const get = name => {
+      const id = prefix + name
+      if (pool[id]) return pool[id]
+      const type = factory[name]
+      return pool[id] = type()
+    }
+    return Object.assign(get, factory)
+  }
+}
+}).call(this)}).call(this,require('_process'),"/src/node_modules/timeline-cards/timeline-cards.js")
+},{"_process":2,"scrollbar":15,"timeline-card":20}],22:[function(require,module,exports){
+(function (process,__filename){(function (){
 const search_input = require('search-input')
 const select_button = require('buttons/select-button')
 const sm_icon_button = require('buttons/sm-icon-button')
@@ -22614,7 +22704,7 @@ function resources (pool) {
   }
 }
 }).call(this)}).call(this,require('_process'),"/src/node_modules/timeline-filter/timeline-filter.js")
-},{"_process":2,"buttons/select-button":9,"buttons/sm-icon-button":10,"buttons/year-button":11,"search-input":16}],22:[function(require,module,exports){
+},{"_process":2,"buttons/select-button":9,"buttons/sm-icon-button":10,"buttons/year-button":11,"search-input":16}],23:[function(require,module,exports){
 (function (process,__filename){(function (){
 const app_timeline = require('app-timeline')
 /******************************************************************************
@@ -22749,7 +22839,7 @@ function resources (pool) {
   }
 }
 }).call(this)}).call(this,require('_process'),"/src/node_modules/timeline-page/timeline-page.js")
-},{"_process":2,"app-timeline":7}],23:[function(require,module,exports){
+},{"_process":2,"app-timeline":7}],24:[function(require,module,exports){
 (function (process,__filename){(function (){
 /******************************************************************************
   YEAR FILTER COMPONENT
