@@ -719,9 +719,9 @@ process.umask = function() { return 0; };
 
 },{}],3:[function(require,module,exports){
 module.exports = require('../../../src/node_modules/theme/dark-theme')
-},{"../../../src/node_modules/theme/dark-theme":18}],4:[function(require,module,exports){
+},{"../../../src/node_modules/theme/dark-theme":19}],4:[function(require,module,exports){
 module.exports = require('../../../src/node_modules/theme/lite-theme')
-},{"../../../src/node_modules/theme/lite-theme":19}],5:[function(require,module,exports){
+},{"../../../src/node_modules/theme/lite-theme":20}],5:[function(require,module,exports){
 (function (process,__filename,__dirname){(function (){
 const desktop = require('..')
 const light_theme = require('theme/lite-theme')
@@ -921,6 +921,7 @@ function resources (pool) {
 },{"..":6,"_process":2,"theme/dark-theme":3,"theme/lite-theme":4}],6:[function(require,module,exports){
 (function (process,__filename){(function (){
 const timeline_page = require('timeline-page')
+const sparkle_effect = require('sparkle-effect')
 /******************************************************************************
   DESKTOP COMPONENT
 ******************************************************************************/
@@ -970,6 +971,14 @@ async function desktop (opts = default_opts, protocol) {
   </div>`
   // ----------------------------------------
   const content_sh = shadow.querySelector('.content').attachShadow(shopts)
+  const desktop_el = shadow.querySelector('.desktop')
+  // ----------------------------------------
+  // ELEMENTS
+  // ----------------------------------------
+  {//sparkle effect
+    const element = sparkle_effect({colors: ["#8A2BE2", "#FFC0CB", "#808080", "#0000FF", "#FFFFE0", "#FFFF00", "#39FF14", "#FFFFFF"]})
+    desktop_el.prepend(element)
+  }
   // ----------------------------------------
   // RESOURCE POOL (can't be serialized)
   // ----------------------------------------
@@ -1092,7 +1101,7 @@ function resources (pool) {
   }
 }
 }).call(this)}).call(this,require('_process'),"/src/desktop.js")
-},{"_process":2,"timeline-page":23}],7:[function(require,module,exports){
+},{"_process":2,"sparkle-effect":17,"timeline-page":24}],7:[function(require,module,exports){
 (function (process,__filename){(function (){
 const timeline_filter = require('timeline-filter')
 const year_filter = require('year-filter')
@@ -1414,7 +1423,7 @@ function resources (pool) {
   }
 }
 }).call(this)}).call(this,require('_process'),"/src/node_modules/app-timeline/app-timeline.js")
-},{"../data/data.json":12,"_process":2,"month-filter":14,"timeline-cards/timeline-cards.js":21,"timeline-filter":22,"year-filter":24}],8:[function(require,module,exports){
+},{"../data/data.json":12,"_process":2,"month-filter":14,"timeline-cards/timeline-cards.js":22,"timeline-filter":23,"year-filter":25}],8:[function(require,module,exports){
 (function (process,__filename){(function (){
 /******************************************************************************
   DAY BUTTON COMPONENT
@@ -21550,6 +21559,172 @@ function resources (pool) {
 }
 }).call(this)}).call(this,require('_process'),"/src/node_modules/search-input/search-input.js")
 },{"_process":2}],17:[function(require,module,exports){
+const shopts = { mode: 'closed' }
+// ----------------------------------------
+module.exports = sparkle_effect
+// ----------------------------------------
+function sparkle_effect(opts) {
+  let possibleColors = (opts && opts.colors) || [
+    "#D61C59",
+    "#E7D84B",
+    "#1B8798",
+  ];
+
+  let width = window.innerWidth;
+  let height = window.innerHeight;
+  const cursor = { x: width / 2, y: width / 2 };
+  const lastPos = { x: width / 2, y: width / 2 };
+  const particles = [];
+  const canvImages = [];
+  let canvas, context;
+  const char = "*";
+  const el = document.createElement('div')
+  const shadow = el.attachShadow(shopts)
+
+  function init() {
+    canvas = document.createElement("canvas");
+    context = canvas.getContext("2d");
+    canvas.style.top = "0px";
+    canvas.style.left = "0px";
+    canvas.style.pointerEvents = "none";
+    canvas.style.position = "fixed";
+    canvas.width = width;
+    canvas.height = height;
+    context.font = "21px serif";
+    context.textBaseline = "middle";
+    context.textAlign = "center";
+
+    possibleColors.forEach((color) => {
+      let measurements = context.measureText(char);
+      let bgCanvas = document.createElement("canvas");
+      let bgContext = bgCanvas.getContext("2d");
+
+      bgCanvas.width = measurements.width;
+      bgCanvas.height =
+        measurements.actualBoundingBoxAscent +
+        measurements.actualBoundingBoxDescent;
+
+      bgContext.fillStyle = color;
+      bgContext.textAlign = "center";
+      bgContext.font = "21px serif";
+      bgContext.textBaseline = "middle";
+      bgContext.fillText(
+        char,
+        bgCanvas.width / 2,
+        measurements.actualBoundingBoxAscent
+      );
+
+      canvImages.push(bgCanvas);
+    });
+
+    bindEvents();
+    loop();
+  }
+  // Bind events that are needed
+  async function bindEvents() {
+    document.body.addEventListener("mousemove", onMouseMove);
+    document.body.addEventListener("touchmove", onTouchMove, { passive: true });
+    document.body.addEventListener("touchstart", onTouchMove, { passive: true });
+    window.addEventListener("resize", onWindowResize);
+  }
+
+  async function onWindowResize(e) {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+
+  async function onTouchMove(e) {
+    if (e.touches.length > 0) {
+      for (let i = 0; i < e.touches.length; i++) {
+        addParticle(
+          e.touches[i].clientX,
+          e.touches[i].clientY,
+          canvImages[Math.floor(Math.random() * canvImages.length)]
+        );
+      }
+    }
+  }
+
+  async function onMouseMove(e) {
+    window.requestAnimationFrame(() => {
+      cursor.x = e.clientX;
+      cursor.y = e.clientY;
+
+      const distBetweenPoints = Math.hypot(
+        cursor.x - lastPos.x,
+        cursor.y - lastPos.y
+      );
+
+      if (distBetweenPoints > 1.5) {
+        addParticle(
+          cursor.x,
+          cursor.y,
+          canvImages[Math.floor(Math.random() * possibleColors.length)]
+        );
+
+        lastPos.x = cursor.x;
+        lastPos.y = cursor.y;
+      }
+    });
+  }
+  async function addParticle(x, y, color) {
+    particles.push(new Particle(x, y, color));
+  }
+  async function updateParticles() {
+    context.clearRect(0, 0, width, height);
+
+    // Update
+    for (let i = 0; i < particles.length; i++) {
+      particles[i].update(context);
+    }
+    // Remove dead particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      if (particles[i].lifeSpan < 0) {
+        particles.splice(i, 1);
+      }
+    }
+  }
+  async function loop() {
+    updateParticles();
+    requestAnimationFrame(loop);
+  }
+
+  function Particle(x, y, canvasItem) {
+    const lifeSpan = Math.floor(Math.random() * 30 + 60);
+    this.initialLifeSpan = lifeSpan; //
+    this.lifeSpan = lifeSpan; //ms
+    this.velocity = {
+      x: (Math.random() < 0.5 ? -1 : 1) * (Math.random() / 2),
+      y: Math.random() * 0.7 + 0.9,
+    };
+    this.position = { x: x, y: y };
+    this.canv = canvasItem;
+
+    this.update = function (context) {
+      this.position.x += this.velocity.x;
+      this.position.y += this.velocity.y;
+      this.lifeSpan--;
+
+      this.velocity.y += 0.02;
+
+      const scale = Math.max(this.lifeSpan / this.initialLifeSpan, 0);
+
+      context.drawImage(
+        this.canv,
+        this.position.x - (this.canv.width / 2) * scale,
+        this.position.y - this.canv.height / 2,
+        this.canv.width * scale,
+        this.canv.height * scale
+      );
+    };
+  }
+  init();
+
+  shadow.append(canvas)
+  return el
+}
+
+},{}],18:[function(require,module,exports){
 const white = {} // hsla(0, 0%, 100%, 1)
 white.hue = 0
 white.saturation = '0%'
@@ -21612,7 +21787,7 @@ purple.opacity = 1
 purple.color = `hsla(${purple.hue}, ${purple.saturation}, ${purple.lightness}, ${purple.opacity})`
 
 module.exports = { white, isabelline, gray, black, eerie_black, night_black, darkblue, green, pink, purple }
-},{}],18:[function(require,module,exports){
+},{}],19:[function(require,module,exports){
 (function (process,__dirname){(function (){
 const brand = require('theme/brand')
 const path = require('path')
@@ -21712,7 +21887,7 @@ const dark_theme = {
 
 module.exports = dark_theme
 }).call(this)}).call(this,require('_process'),"/src/node_modules/theme/dark-theme")
-},{"_process":2,"path":1,"theme/brand":17}],19:[function(require,module,exports){
+},{"_process":2,"path":1,"theme/brand":18}],20:[function(require,module,exports){
 (function (process,__dirname){(function (){
 const brand = require('theme/brand')
 const path = require('path')
@@ -21812,7 +21987,7 @@ const light_theme = {
 
 module.exports = light_theme
 }).call(this)}).call(this,require('_process'),"/src/node_modules/theme/lite-theme")
-},{"_process":2,"path":1,"theme/brand":17}],20:[function(require,module,exports){
+},{"_process":2,"path":1,"theme/brand":18}],21:[function(require,module,exports){
 (function (process,__filename){(function (){
 /******************************************************************************
   TIMELINE CARD COMPONENT
@@ -22000,7 +22175,7 @@ function resources (pool) {
   }
 }
 }).call(this)}).call(this,require('_process'),"/src/node_modules/timeline-card/timeline-card.js")
-},{"_process":2}],21:[function(require,module,exports){
+},{"_process":2}],22:[function(require,module,exports){
 (function (process,__filename){(function (){
 const timeline_card = require('timeline-card')
 const scrollbar = require('scrollbar')
@@ -22340,7 +22515,7 @@ function timeline_cards (opts = default_opts, protocol) {
       })
     }
     //update timeline_cards
-    card_index = 0
+    card_index = card_index_rev = 0
     clear_timeline()
     append_cards(0, card_filter.length < 10 ? card_filter.length : 10)
     //Update scrollbar and calendar
@@ -22486,7 +22661,7 @@ function resources (pool) {
   }
 }
 }).call(this)}).call(this,require('_process'),"/src/node_modules/timeline-cards/timeline-cards.js")
-},{"_process":2,"scrollbar":15,"timeline-card":20}],22:[function(require,module,exports){
+},{"_process":2,"scrollbar":15,"timeline-card":21}],23:[function(require,module,exports){
 (function (process,__filename){(function (){
 const search_input = require('search-input')
 const select_button = require('buttons/select-button')
@@ -22704,7 +22879,7 @@ function resources (pool) {
   }
 }
 }).call(this)}).call(this,require('_process'),"/src/node_modules/timeline-filter/timeline-filter.js")
-},{"_process":2,"buttons/select-button":9,"buttons/sm-icon-button":10,"buttons/year-button":11,"search-input":16}],23:[function(require,module,exports){
+},{"_process":2,"buttons/select-button":9,"buttons/sm-icon-button":10,"buttons/year-button":11,"search-input":16}],24:[function(require,module,exports){
 (function (process,__filename){(function (){
 const app_timeline = require('app-timeline')
 /******************************************************************************
@@ -22839,7 +23014,7 @@ function resources (pool) {
   }
 }
 }).call(this)}).call(this,require('_process'),"/src/node_modules/timeline-page/timeline-page.js")
-},{"_process":2,"app-timeline":7}],24:[function(require,module,exports){
+},{"_process":2,"app-timeline":7}],25:[function(require,module,exports){
 (function (process,__filename){(function (){
 /******************************************************************************
   YEAR FILTER COMPONENT
