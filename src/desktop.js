@@ -1,4 +1,5 @@
 const timeline_page = require('timeline-page')
+const sparkle_effect = require('sparkle-effect')
 /******************************************************************************
   DESKTOP COMPONENT
 ******************************************************************************/
@@ -48,6 +49,14 @@ async function desktop (opts = default_opts, protocol) {
   </div>`
   // ----------------------------------------
   const content_sh = shadow.querySelector('.content').attachShadow(shopts)
+  const desktop_el = shadow.querySelector('.desktop')
+  // ----------------------------------------
+  // ELEMENTS
+  // ----------------------------------------
+  {//sparkle effect
+    const element = sparkle_effect({colors: ["#8A2BE2", "#FFC0CB", "#808080", "#0000FF", "#FFFFE0", "#FFFF00", "#39FF14", "#FFFFFF"]})
+    desktop_el.prepend(element)
+  }
   // ----------------------------------------
   // RESOURCE POOL (can't be serialized)
   // ----------------------------------------
